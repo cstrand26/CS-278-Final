@@ -1,0 +1,38 @@
+First, you want to take the board and connect it through the handy wire that plugs into your computer's usb port.
+Second, you'll want to run the handy dandy putty program provided
+Third, you'll want make sure you're typing the following commands directly into the putty text window
+
+When you press a lowercase " a-z " letter on your keyboard, you should hear a note play on one of the buzzers
+The notes should go in order from left to right, starting on the bottom row and ending at the top
+(" z " should be your lowest note and " p " should be your highest)
+
+If you use " SHIFT "+ letter or use " CAPS LOCK ", the instead is saved to a loop that outputs sounds to the other buzzer
+(Note that if stop at just one note, you'll create a loop only containing one note, which will sound very much like an endless long tone)
+If you play the same note multiple times in a row, you'll just create a longer note
+If you press the " SPACE BAR "  you'll create a rest where no note will be played
+The limit of individual keystroke notes that can be saved in the loop is 255
+If you press " ` ", all buzzers will immediately stop playing and the loop you created should clear
+
+You'll notice that the notes you play with " a-z ", " A-Z ", and the rests you play with " SPACE BAR " are all the same length
+If you press " + " the notes should double in length and if you press " - " their length should be cut in half
+(Note that there is a limited number of preset speeds, if you press " + " while on the longest length, you should jump to the shortest
+and if you press " - " while on the shortest length, you should jump to the longest)
+
+The last thing you'll need to know is the numbers.
+Pressing " 0-9 " will change the pitches " a-z " and " A-Z " will play according to different predetermined scales.
+This means sometimes " z " and " Z " play " c3 " and sometimes they play " b2 "
+This also means that sometimes the next note of the next octave up from " z "  is " a ", " n ", " m ", " s ", or " h " depending on how many notes are in the scale
+The scales are as follows:
+0 - Major C Scale (7 notes to octave)
+1 - Harmonic Minor C Scale (7 notes to octave)
+2 - Minor C Scale (7 notes to octave)
+3 - Aeolian Dominant C Scale (7 notes to octave)
+4 - Phyrgian Dominant C Scale (7 notes to octave)
+5 - Major Bebop C Scale (8 notes to octave)
+6 - Pentatonic C Scale (5 notes to octave)
+7 - Pentatonic B Scale (5 notes to octave)
+8 - Blues C Scale (6 notes to octave)
+9 - Chromatic Scale (12 notes to octave)
+
+Follow this link for a Demo:
+https://youtu.be/-5SB_0wwm58

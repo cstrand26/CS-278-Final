@@ -1,0 +1,1051 @@
+gavrasm Gerd's AVR assembler version 5.4 (C)2022 by DG4FAC
+----------------------------------------------------------
+Source file: C:\Users\gondo\OneDrive\Desktop\CS\CS-278 Assembler\Final_Project_lovelace/source/test.asm
+Hex file:    C:\Users\gondo\OneDrive\Desktop\CS\CS-278 Assembler\Final_Project_lovelace/source/test.hex
+Eeprom file: C:\Users\gondo\OneDrive\Desktop\CS\CS-278 Assembler\Final_Project_lovelace/source/test.eep
+Compiled:    10.12.2023, 22:13:45
+Pass:        2
+     1: ;
+     2: ; Final project
+     3: ;
+     4: ; Created: 11/11/2023
+     5: ; Author : Nic Tibbetts, Christopher Strand
+     6: ;
+     7: ; compile with:
+     8: ; gavrasm.exe -b main.asm
+     9: ; 
+    10: ; upload with:
+    11: ; avrdude -c arduino -p atmega328p -P COM4 -U main.hex
+    12: ;
+    13: .DEVICE ATmega328p ;Define the correct device
+    14: .EQU STACK_SRAM = $08FF ; Starting location of stack
+    15: .EQU BUZZER_1 = $0100 ; Temp value for buzzer 1
+    16: .EQU BUZZER_2 = $0101 ; Temp value for buzzer 2
+    17: .EQU SCALE = $0102 ; For carrying the value of the current scale
+    18: .EQU COUNTER_1 = $0103 ; For keeping offset for buzzer_1
+    19: .EQU COUNTER_2 = $0104 ; For keeping offset for buzzer_2
+    20: .EQU TICK_NEEDED = $0105 ; For keeping track of the preset tick amount before ending note
+    21: .EQU TICK_CURRENT_1 = $0106 ; For keeping track of current tick count for buzzer 1
+    22: .EQU TICK_CURRENT_2 = $107 ; For keeping track of current tick count for buzzer 2
+    23: .EQU TIMER_OFFSET = $0108 ; The current offset for
+    24: .EQU OFFSET_FOR_2 = $0109 ; saves the offset for counter 2 for storage in loop
+    25: .EQU BUZZER_2_SIZE = $010A ; Stores the size of Buzzer 2, for looping
+    26: .EQU BUZZER_2_CURRENT = $010B ; Stores the current position in the loop for Buzzer 2
+    27: .EQU BUZZER_2_OFFSETS = $010C ; Starting location for list of offsets for Buzzer 2
+    28: .cseg
+    29: .org 000000
+    30: 000000   C03C  rjmp begin ; Reset vector
+    31: 000001   0000  nop
+    32: 000002   9518  reti ; INT0
+    33: 000003   0000  nop
+    34: 000004   9518  reti ; INT1
+    35: 000005   0000  nop
+    36: 000006   9518  reti ; PCI0
+    37: 000007   0000  nop
+    38: 000008   9518  reti ; PCI1
+    39: 000009   0000  nop
+    40: 00000A   9518  reti ; PCI2
+    41: 00000B   0000  nop
+    42: 00000C   9518  reti ; WDT
+    43: 00000D   0000  nop
+    44: 00000E   9518  reti ; OC2A
+    45: 00000F   0000  nop
+    46: 000010   9518  reti ; OC2B
+    47: 000011   0000  nop
+    48: 000012   9518  reti ; OVF2
+    49: 000013   0000  nop
+    50: 000014   9518  reti ; ICP1
+    51: 000015   0000  nop
+    52: 000016   9518  reti ; OC1A
+    53: 000017   0000  nop
+    54: 000018   9518  reti ; OC1B
+    55: 000019   0000  nop
+    56: 00001A   9518  reti ; OVF1
+    57: 00001B   0000  nop
+    58: 00001C   9518  reti ; OC0A
+    59: 00001D   0000  nop
+    60: 00001E   9518  reti ; OC0B
+    61: 00001F   0000  nop
+    62: 000020   9518  reti ; OVF0
+    63: 000021   0000  nop
+    64: 000022   9518  reti ; SPI
+    65: 000023   0000  nop
+    66: 000024   C00F  rjmp intr_urx ; URXC
+    67: 000025   0000  nop
+    68: 000026   9518  reti ; UDRE
+    69: 000027   0000  nop
+    70: 000028   9518  reti ; UTXC
+    71: 000029   0000  nop
+    72: 00002A   9518  reti ; ADCC
+    73: 00002B   0000  nop
+    74: 00002C   9518  reti ; ERDY
+    75: 00002D   0000  nop
+    76: 00002E   9518  reti ; ACI
+    77: 00002F   0000  nop
+    78: 000030   9518  reti ; TWI
+    79: 000031   0000  nop
+    80: 000032   9518  reti ; SPMR
+    81: 000033   0000  nop
+    82: intr_urx: ; interupt for receiving data through usart
+    83: 000034   930F  push r16 ; store register
+    84: 000035   9100  lds r16, UDR0 ; Load data received
+        000036   00C6
+    85: 000037   940E  call interpret_ascii ; loads counter or scale based on ascii value
+        000038   00EC
+    86: 000039   940E  call serial_send ; Send it back through USART
+        00003A   00CB
+    87: 00003B   910F  pop r16 ; restore register
+    88: 00003C   9518  reti ;
+    89: begin: ; the beginning
+    90:     ; Setting stack pointer
+    91: 00003D   E048  ldi r20, HIGH(STACK_SRAM) ; Set high part of stack pointer
+    92: 00003E   BF4E  out SPH, r20 ;
+    93: 00003F   EF4F  ldi r20, LOW(STACK_SRAM) ; Set low part of stack pointer
+    94: 000040   BF4D  out SPL, r20 ;
+    95: 	;
+    96: 	; PortD, PortC and PortB set up
+    97: 000041   E440  ldi r20, (1<<PD6) ; DDRD - data direction (PIN 6 output, PINS 7 and 0-5 input) OC0A is PORTD:6
+    98: 000042   B94A  out DDRD, r20 ; Send configuration
+    99: 000043   E048  ldi r20, (1<<PB3) ; DDRB - data direction (PIN 3 output, PINS 4-7 and 0-2 input) OC2A is PORTB:3
+   100: 000044   B944  out DDRB, r20 ; Send configuration
+   101: 000045   E040  ldi r20, $00 ; DDRC - data direction (all PINS input)
+   102: 000046   B947  out DDRC, r20 ; Send configuration
+   103: 	;
+   104: 	; set up counter 0
+   105: 	; set up change toggle on compare match COM0A1 and COM0A0
+   106: 	; set up clear timer on compare match WGM01 and WGM00
+   107: 000047   E442  ldi r20, (0<<COM0A1)|(1<<COM0A0)|(1<<WGM01)|(0<<WGM00) 
+   108: 000048   BD44  out TCCR0A, r20 ; for counter 0
+   109: 	; set up clock select for prescaler CS02, CS01, and CS00 to /256
+   110: 000049   E044  ldi r20, (1<<CS02)|(0<<CS01)|(0<<CS00)
+   111: 00004A   BD45  out TCCR0B, r20
+   112: 	;
+   113: 	; set up counter 2
+   114: 	; set up change toggle on compare match COM2A1 and COM2A0
+   115: 	; set up clear timer on compare match WGM21 and WGM20
+   116: 00004B   E442  ldi r20, (0<<COM2A1)|(1<<COM2A0)|(1<<WGM21)|(0<<WGM20) 
+   117: 00004C   9340  sts TCCR2A, r20 ; for counter 2
+        00004D   00B0
+   118: 	; set up clock select for prescaler CS22, CS21, and CS20 to /256
+   119: 00004E   E046  ldi r20, (1<<CS22)|(1<<CS21)|(0<<CS20)
+   120: 00004F   9340  sts TCCR2B, r20
+        000050   00B1
+   121: 	;
+   122: 	; set up counter 1
+   123: 000051   E04B  ldi r20, $03 | (1<<WGM12); Setting clock select to clk/1024 from IO clock (16MHz >> ~16Khz) + WGM12 set high
+   124: 000052   9340  sts TCCR1B, r20 ; write to Timer/Counter1 Control Register B
+        000053   0081
+   125: 	; speed for the opener
+   126: 000054   E74D  ldi r20, $7D ; upper part of 16bit number
+   127: 000055   9340  sts OCR1AH, r20 ; write upper first
+        000056   0089
+   128: 000057   E040  ldi r20, $00 ; lower part of 16bit number
+   129: 000058   9340  sts OCR1AL, r20 ; write lower (and temp) second
+        000059   0088
+   130: 	; calls fun opening music
+   131: 00005A   940E  call zelda_unlock_start
+        00005B   0288
+   132: 	; sets number of ticks needed to call the metronome function
+   133: 00005C   E74F  ldi r20, $7F ; should call the needed function every 64 ticks
+   134: 00005D   9340  sts TICK_NEEDED, r20
+        00005E   0105
+   135: 	; change length of notes for actual keyboard
+   136: 00005F   E5E8  ldi ZL, LOW(TIMER_SPEED*2) ; load in address into Z
+   137: 000060   E0F6  ldi ZH, HIGH(TIMER_SPEED*2)
+   138: 000061   9145  lpm r20, Z+ ; upper part of 16bit number
+   139: 000062   9340  sts OCR1AH, r20 ; write upper first
+        000063   0089
+   140: 000064   9144  lpm r20, Z ; lower part of 16bit number
+   141: 000065   9340  sts OCR1AL, r20 ; write lower (and temp) second
+        000066   0088
+   142: 
+   143: 	; clear counters and scale at reboot cause they save for some reason
+   144: 000067   2744  clr r20
+   145: 000068   9340  sts COUNTER_1, r20
+        000069   0103
+   146: 00006A   9340  sts COUNTER_2, r20
+        00006B   0104
+   147: 00006C   9340  sts SCALE, r20
+        00006D   0102
+   148: 00006E   9340  sts TICK_CURRENT_1, r20
+        00006F   0106
+   149: 000070   9340  sts TICK_CURRENT_2, r20
+        000071   0107
+   150: 000072   9340  sts BUZZER_2_SIZE, r20
+        000073   010A
+   151: 000074   9340  sts BUZZER_2_CURRENT, r20
+        000075   010B
+   152: 000076   9340  sts TIMER_OFFSET, r20
+        000077   0108
+   153: 	;
+   154: 000078   940E  call usart_init ; initialize usart communication
+        000079   00BA
+   155: 	;
+   156: 00007A   9478  sei ; turn on global interrupts
+   157: motherloop: ; the loop where everything happens. Leave r19, r20, and r21 alone for note_check
+   158: 	; note check
+   159: 00007B   940E  call note_check ; compares r19, r20, and r21 to Scale, Counter 1, and Counter 2, changes notes and resets ticks if necessary
+        00007C   0127
+   160: 	; output to buzzer 1
+   161: 00007D   9100  lds r16, BUZZER_1 ; load stored buzzer freq
+        00007E   0100
+   162: 00007F   BD07  out OCR0A, r16 ; send it
+   163: 	; output to buzzer 2
+   164: 000080   9100  lds r16, BUZZER_2 ; load stored buzzer freq
+        000081   0101
+   165: 000082   9300  sts OCR2A, r16 ; send it
+        000083   00B3
+   166: 000084   9BB1  sbis TIFR1, OCF1A ; skip if bit in Timer/Counter Interrupt Flag register is clear
+   167: 000085   CFF5  rjmp motherloop
+   168: 000086   9AB1  sbi TIFR1, OCF1A ; Set timer compare bit (should clear it)
+   169: 000087   9100  lds r16, TICK_CURRENT_1 ; load tick for ending buzzer 1
+        000088   0106
+   170: 000089   9110  lds r17, TICK_NEEDED ; load in metronome 
+        00008A   0105
+   171: 00008B   1701  cp r16, r17 ; if we've reached enough ticks
+   172: 00008C   F039  breq metronome_1 ; jump to clear counter_1
+   173: motherloop_next:
+   174: 00008D   9100  lds r16, TICK_CURRENT_2 ; load tick for transitioning buzzer 2
+        00008E   0107
+   175: 00008F   1701  cp r16, r17 ; if we've reached enough ticks
+   176: 000090   F049  breq metronome_2 ; jump to transition counter_2
+   177: motherloop_end:	
+   178: 000091   940E  call next_tick ; moves the ticks of both counters forward 1
+        000092   009D
+   179: 000093   CFE7  rjmp motherloop ; heads back to begining
+   180: ;
+   181: metronome_1: ; called if the predetermined number of ticks have occurred
+   182: 000094   930F  push r16 ; store
+   183: 000095   2700  clr r16 ; insures it's cleared
+   184: 000096   9300  sts COUNTER_1, r16 ; sets offset for buzzer 1 to $00
+        000097   0103
+   185: 000098   910F  pop r16 ; restore
+   186: 000099   CFF3  rjmp motherloop_next ; head to next check
+   187: ;
+   188: metronome_2:
+   189: 00009A   940E  call buzzer_2_loop ; moves counter 2 to next note in loop
+        00009B   02FB
+   190: 00009C   CFF4  rjmp motherloop_end ; jumps back to end
+   191: next_tick: ; checks how many ticks have happened
+   192: 00009D   930F  push r16 ; store
+   193: 00009E   931F  push r17
+   194: 00009F   9100  lds r16, TICK_CURRENT_1 ; how many ticks have occurred
+        0000A0   0106
+   195: 0000A1   9110  lds r17, TICK_NEEDED ; how many ticks before reset
+        0000A2   0105
+   196: 0000A3   9503  inc r16 ; increase
+   197: 0000A4   1710  cp r17, r16 
+   198: 0000A5   F060  brlo reset_tick_1 ; if we've reached the point to reset TICK_CURRENT_1 to 0
+   199: 0000A6   9300  sts TICK_CURRENT_1, r16 ; store value increased by 1
+        0000A7   0106
+   200: next_tick_2:
+   201: 0000A8   9100  lds r16, TICK_CURRENT_2 ; how many ticks have occurred
+        0000A9   0107
+   202: 0000AA   9503  inc r16 ; increase
+   203: 0000AB   1710  cp r17, r16
+   204: 0000AC   F048  brlo reset_tick_2 ; if we've reached the point to reset TICK_CURRENT_2 to 0
+   205: 0000AD   9300  sts TICK_CURRENT_2, r16 ; store value increased by 1
+        0000AE   0107
+   206: end_tick:
+   207: 0000AF   911F  pop r17
+   208: 0000B0   910F  pop r16 ; restore
+   209: 0000B1   9508  ret
+   210: reset_tick_1: 
+   211: 0000B2   2700  clr r16
+   212: 0000B3   9300  sts TICK_CURRENT_1, r16 ; reset to 0
+        0000B4   0106
+   213: 0000B5   CFF2  rjmp next_tick_2
+   214: reset_tick_2: 
+   215: 0000B6   2700  clr r16
+   216: 0000B7   9300  sts TICK_CURRENT_2, r16 ; reset to 0
+        0000B8   0107
+   217: 0000B9   CFF5  rjmp end_tick
+   218: ;
+   219: usart_init: ; initializes contact with usart
+   220: 0000BA   930F  push r16 ; store registers
+   221: 0000BB   931F  push r17 ;
+   222:     ; Set baud rate
+   223: 0000BC   E010  ldi r17, $00 ; High baud (aiming for 9600bps)
+   224: 0000BD   E607  ldi r16, $67 ; Low baud
+   225: 0000BE   9310  sts UBRR0H, r17
+        0000BF   00C5
+   226: 0000C0   9300  sts UBRR0L, r16
+        0000C1   00C4
+   227:     ; Enable receiver and transmitter
+   228: 0000C2   E908  ldi r16, (1<<RXEN0)|(1<<TXEN0)|(1<<RXCIE0)
+   229: 0000C3   9300  sts UCSR0B, r16
+        0000C4   00C1
+   230:     ; Set frame format: 8data, 2stop bit
+   231: 0000C5   E00E  ldi r16, (1<<USBS0)|(3<<UCSZ00)
+   232: 0000C6   9300  sts UCSR0C, r16
+        0000C7   00C2
+   233: 0000C8   911F  pop r17 ; restore register
+   234: 0000C9   910F  pop r16
+   235: 0000CA   9508  ret ;
+   236: ; initializes sending the data back
+   237: serial_send: ; passes in r16, sends it through USART
+   238: 0000CB   931F  push r17 ; store register
+   239: ; loop that continues until the data is sent back
+   240: serial_send_loop: ;
+   241: 0000CC   9110  lds r17, UCSR0A ; pulls in status
+        0000CD   00C0
+   242: 0000CE   FF15  sbrs r17, UDRE0 ; checks flag
+   243: 0000CF   CFFC  rjmp serial_send_loop ; loop
+   244: 0000D0   9300  sts UDR0, r16; sends data in r16
+        0000D1   00C6
+   245: 0000D2   911F  pop r17 ; restore register
+   246: 0000D3   9508  ret
+   247: ;	
+   248: ; interprets ascii value received
+   249: increase_length: ; increases length of each note
+   250: 0000D4   9120  lds r18, TIMER_OFFSET ; load in current offset value
+        0000D5   0108
+   251: 0000D6   9523  inc r18 ; increase by 2
+   252: 0000D7   9523  inc r18
+   253: 0000D8   702F  andi r18, $0F ; clear up nibble
+   254: 0000D9   9320  sts TIMER_OFFSET, r18 ; load in
+        0000DA   0108
+   255: 0000DB   940E  call change_speed ; call function that changes speed
+        0000DC   02AE
+   256: 0000DD   C02C  rjmp interpret_ascii_done ; finished
+   257: decrease_length: ; decreases legnth of each note
+   258: 0000DE   9120  lds r18, TIMER_OFFSET ; load in current offset value
+        0000DF   0108
+   259: 0000E0   952A  dec r18 ; decrease by 2
+   260: 0000E1   952A  dec r18
+   261: 0000E2   702F  andi r18, $0F ; clear up nibble
+   262: 0000E3   9320  sts TIMER_OFFSET, r18 ; load in
+        0000E4   0108
+   263: 0000E5   940E  call change_speed ; call function that changes speed
+        0000E6   02AE
+   264: 0000E7   C022  rjmp interpret_ascii_done ; finished
+   265: space_bar:
+   266: 0000E8   2722  clr r18 ; set it to $00
+   267: 0000E9   940E  call buzzer_2_storage ; stores cleared value in buzzer_2_loop of offsets
+        0000EA   02C8
+   268: 0000EB   C01E  rjmp interpret_ascii_done	
+   269: interpret_ascii: ; pass in r16 and compare against expected ascii values
+   270: 0000EC   931F  push r17 ; store
+   271: 0000ED   93EF  push ZL
+   272: 0000EE   93FF  push ZH
+   273: 0000EF   932F  push r18
+   274: 0000F0   933F  push r19
+   275: 0000F1   2733  clr r19
+   276: 0000F2   2F10  mov r17, r16 ; copy so r16 is not effected
+   277: 0000F3   321B  cpi r17, '+'
+   278: 0000F4   F2F9  breq increase_length ; for increasing timer 1 compare
+   279: 0000F5   321D  cpi r17, '-'
+   280: 0000F6   F339  breq decrease_length ; for decreasing timer 1 compare
+   281: 0000F7   3210  cpi r17, $20
+   282: 0000F8   F379  breq space_bar ; for adding cleared offset to buzzer 2 loop
+   283: 0000F9   371B  cpi r17, 'z' +1
+   284: 0000FA   F470  brsh outside_range
+   285: 0000FB   3310  cpi r17, '0'
+   286: 0000FC   F060  brlo outside_range
+   287: 0000FD   3610  cpi r17, $60
+   288: 0000FE   F488  brsh lower_case_ascii ; for buzzer 1 values and clear
+   289: 0000FF   351B  cpi r17, 'Z'+1
+   290: 000100   F440  brsh outside_range
+   291: 000101   3411  cpi r17, 'A'
+   292: 000102   F4D8  brsh upper_case_ascii ; for buzzer 2 values
+   293: 000103   331A  cpi r17, '9' +1
+   294: 000104   F420  brsh outside_range 
+   295: 000105   5310  subi r17, '0' ; so that r17 is 0-9
+   296: 000106   9310  sts SCALE, r17 ; stores that value in current scale
+        000107   0102
+   297: 000108   C001  rjmp interpret_ascii_done
+   298: outside_range: ; if a value outside of the expected range was given
+   299: 000109   E000  ldi r16, $00 
+   300: interpret_ascii_done: ; when complete
+   301: 00010A   913F  pop r19
+   302: 00010B   912F  pop r18
+   303: 00010C   91FF  pop ZH
+   304: 00010D   91EF  pop ZL
+   305: 00010E   911F  pop r17 ; restore
+   306: 00010F   9508  ret
+   307: lower_case_ascii: ; clear or buzzer 1
+   308: 000110   3610  cpi r17, $60 ; if the value is '`'
+   309: 000111   F049  breq special_clear_ascii
+   310: 000112   5611  subi r17, 'a' ; so that 'a' is 0 and 'z' is 25
+   311: 000113   E3EE  ldi ZL, LOW(OFFSET_LETTER_VALUE*2) ; load in address into Z
+   312: 000114   E0F6  ldi ZH, HIGH(OFFSET_LETTER_VALUE*2)
+   313: 000115   0FE1  add ZL, r17 ; move z pointer to offset
+   314: 000116   1FF3  adc ZH, r19 ; deal with overflow if memory is on an 8 bit edge
+   315: 000117   9124  lpm r18, Z ; load value of offset for counter from library
+   316: 000118   9320  sts COUNTER_1, r18
+        000119   0103
+   317: 00011A   CFEF  rjmp interpret_ascii_done
+   318: special_clear_ascii: ; clears both counters, silencing both buzzers
+   319: 00011B   940E  call clear_buzzers
+        00011C   02DE
+   320: 00011D   CFEC  rjmp interpret_ascii_done	
+   321: upper_case_ascii: ; effects only buzzer 2
+   322: 00011E   5411  subi r17, 'A' ; so that 'A' is 0 and 'Z' is 25
+   323: 00011F   E3EE  ldi ZL, LOW(OFFSET_LETTER_VALUE*2) ; load in address into Z
+   324: 000120   E0F6  ldi ZH, HIGH(OFFSET_LETTER_VALUE*2)
+   325: 000121   0FE1  add ZL, r17 ; move z pointer to offset
+   326: 000122   1FF3  adc ZH, r19 ; deal with overflow if memory is on an 8 bit edge
+   327: 000123   9124  LPM r18, Z ; load value of offset for counter from library
+   328: 000124   940E  call buzzer_2_storage ; stores the value in a SRAM location for a loop for Buzzer 2
+        000125   02C8
+   329: 000126   CFE3  rjmp interpret_ascii_done
+   330: ;
+   331: note_check: ; pass in r19 (last scale), r20 (last counter_1), and r21 (last counter_2)
+   332: 000127   930F  push r16 ; store
+   333: 000128   931F  push r17
+   334: 000129   932F  push r18
+   335: 00012A   9100  lds r16, SCALE ; loads scale position
+        00012B   0102
+   336: 00012C   9110  lds r17, COUNTER_1 ; loads buzzer 1 value
+        00012D   0103
+   337: 00012E   9120  lds r18, COUNTER_2 ; loads buzzer 2 value
+        00012F   0104
+   338: 000130   1314  cpse r17, r20 ; compares previous buzzer 1 to current
+   339: 000131   940E  call note_change_1
+        000132   013D
+   340: 000133   1325  cpse r18, r21 ; compares previous buzzer 2 to current
+   341: 000134   940E  call note_change
+        000135   0143
+   342: 000136   1303  cpse r16, r19 ; compares previous scale position to current
+   343: 000137   940E  call note_change
+        000138   0143
+   344: 000139   912F  pop r18
+   345: 00013A   911F  pop r17
+   346: 00013B   910F  pop r16 ; restore
+   347: 00013C   9508  ret
+   348: note_change_1:
+   349: 00013D   930F  push r16 ; store
+   350: 00013E   2700  clr r16 ; make sure it's clear
+   351: 00013F   9300  sts TICK_CURRENT_1, r16 ; reset buzzer 1 tick counter
+        000140   0106
+   352: 000141   910F  pop r16
+   353: 000142   C000  rjmp note_change ; continue
+   354: note_change:
+   355: 000143   936F  push r22 ; store
+   356: 000144   9360  sts TCNT1H, r22 ; resets counter for timer 1
+        000145   0085
+   357: 000146   9360  sts TCNT1L, r22
+        000147   0084
+   358: 000148   2F30  mov r19, r16 ; loads new positions into old
+   359: 000149   2F41  mov r20, r17
+   360: 00014A   2F52  mov r21, r18
+   361: 00014B   1306  cpse r16, r22; begin checking scales
+   362: 00014C   C003  rjmp change_1 ; jump to the next
+   363: 00014D   940E  call scale_0 ; change the notes according to this scale
+        00014E   0184
+   364: 00014F   C032  rjmp note_change_done ; jump to the end
+   365: change_1:
+   366: 000150   9563  inc r22
+   367: 000151   1306  cpse r16, r22 ;
+   368: 000152   C003  rjmp change_2 ; jump to the next
+   369: 000153   940E  call scale_1 ; change the notes according to this scale
+        000154   0191
+   370: 000155   C02C  rjmp note_change_done ; jump to the end
+   371: change_2:
+   372: 000156   9563  inc r22
+   373: 000157   1306  cpse r16, r22 ;
+   374: 000158   C003  rjmp change_3 ; jump to the next
+   375: 000159   940E  call scale_2 ; change the notes according to this scale
+        00015A   019E
+   376: 00015B   C026  rjmp note_change_done ; jump to the end
+   377: change_3:
+   378: 00015C   9563  inc r22
+   379: 00015D   1306  cpse r16, r22 ;
+   380: 00015E   C003  rjmp change_4 ; jump to the next
+   381: 00015F   940E  call scale_3 ; change the notes according to this scale
+        000160   01AB
+   382: 000161   C020  rjmp note_change_done ; jump to the end
+   383: change_4:
+   384: 000162   9563  inc r22
+   385: 000163   1306  cpse r16, r22 ;
+   386: 000164   C003  rjmp change_5 ; jump to the next
+   387: 000165   940E  call scale_4 ; change the notes according to this scale
+        000166   01B8
+   388: 000167   C01A  rjmp note_change_done ; jump to the end
+   389: change_5:
+   390: 000168   9563  inc r22
+   391: 000169   1306  cpse r16, r22 ;
+   392: 00016A   C003  rjmp change_6 ; jump to the next
+   393: 00016B   940E  call scale_5 ; change the notes according to this scale
+        00016C   01C5
+   394: 00016D   C014  rjmp note_change_done ; jump to the end
+   395: change_6:
+   396: 00016E   9563  inc r22
+   397: 00016F   1306  cpse r16, r22 ;
+   398: 000170   C003  rjmp change_7 ; jump to the next
+   399: 000171   940E  call scale_6 ; change the notes according to this scale
+        000172   01D2
+   400: 000173   C00E  rjmp note_change_done ; jump to the end
+   401: change_7:
+   402: 000174   9563  inc r22
+   403: 000175   1306  cpse r16, r22 ;
+   404: 000176   C003  rjmp change_8 ; jump to the next
+   405: 000177   940E  call scale_7 ; change the notes according to this scale
+        000178   01DF
+   406: 000179   C008  rjmp note_change_done ; jump to the end
+   407: change_8:
+   408: 00017A   9563  inc r22
+   409: 00017B   1306  cpse r16, r22 ;
+   410: 00017C   C003  rjmp change_9 ; jump to the next
+   411: 00017D   940E  call scale_8 ; change the notes according to this scale
+        00017E   01EC
+   412: 00017F   C002  rjmp note_change_done ; jump to the end
+   413: change_9:
+   414: 000180   940E  call scale_9 ; change the notes according to this scale
+        000181   01F9
+   415: note_change_done: ; complete changes
+   416: 000182   916F  pop r22
+   417: 000183   9508  ret
+   418: scale_0: ; carry in r20 (counter_1) and r21 (counter_2)
+   419: 000184   933F  push r19
+   420: 000185   2F34  mov r19, r20 ; load counter in
+   421: 000186   940E  call major_c_notes ; 
+        000187   0213
+   422: 000188   9330  sts BUZZER_1, r19 ; store new note
+        000189   0100
+   423: 00018A   2F35  mov r19, r21 ; load counter in
+   424: 00018B   940E  call major_c_notes ;
+        00018C   0213
+   425: 00018D   9330  sts BUZZER_2, r19 ; store new note
+        00018E   0101
+   426: 00018F   913F  pop r19
+   427: 000190   9508  ret
+   428: scale_1: ; carry in r20 (counter_1) and r21 (counter_2)
+   429: 000191   933F  push r19
+   430: 000192   2F34  mov r19, r20 ; load counter in
+   431: 000193   940E  call pentatonic_c_notes ; 
+        000194   023A
+   432: 000195   9330  sts BUZZER_1, r19 ; store new note
+        000196   0100
+   433: 000197   2F35  mov r19, r21 ; load counter in
+   434: 000198   940E  call pentatonic_c_notes ;
+        000199   023A
+   435: 00019A   9330  sts BUZZER_2, r19 ; store new note
+        00019B   0101
+   436: 00019C   913F  pop r19
+   437: 00019D   9508  ret
+   438: scale_2: ; carry in r20 (counter_1) and r21 (counter_2)
+   439: 00019E   933F  push r19
+   440: 00019F   2F34  mov r19, r20 ; load counter in
+   441: 0001A0   940E  call pentatonic_b_notes ; 
+        0001A1   022D
+   442: 0001A2   9330  sts BUZZER_1, r19 ; store new note
+        0001A3   0100
+   443: 0001A4   2F35  mov r19, r21 ; load counter in
+   444: 0001A5   940E  call pentatonic_b_notes ;
+        0001A6   022D
+   445: 0001A7   9330  sts BUZZER_2, r19 ; store new note
+        0001A8   0101
+   446: 0001A9   913F  pop r19
+   447: 0001AA   9508  ret
+   448: scale_3: ; carry in r20 (counter_1) and r21 (counter_2)
+   449: 0001AB   933F  push r19
+   450: 0001AC   2F34  mov r19, r20 ; load counter in
+   451: 0001AD   940E  call blues_c_notes ; 
+        0001AE   0206
+   452: 0001AF   9330  sts BUZZER_1, r19 ; store new note
+        0001B0   0100
+   453: 0001B1   2F35  mov r19, r21 ; load counter in
+   454: 0001B2   940E  call blues_c_notes ;
+        0001B3   0206
+   455: 0001B4   9330  sts BUZZER_2, r19 ; store new note
+        0001B5   0101
+   456: 0001B6   913F  pop r19
+   457: 0001B7   9508  ret
+   458: scale_4: ; carry in r20 (counter_1) and r21 (counter_2)
+   459: 0001B8   933F  push r19
+   460: 0001B9   2F34  mov r19, r20 ; load counter in
+   461: 0001BA   940E  call minor_c_notes ; 
+        0001BB   0220
+   462: 0001BC   9330  sts BUZZER_1, r19 ; store new note
+        0001BD   0100
+   463: 0001BE   2F35  mov r19, r21 ; load counter in
+   464: 0001BF   940E  call minor_c_notes ;
+        0001C0   0220
+   465: 0001C1   9330  sts BUZZER_2, r19 ; store new note
+        0001C2   0101
+   466: 0001C3   913F  pop r19
+   467: 0001C4   9508  ret
+   468: scale_5: ; carry in r20 (counter_1) and r21 (counter_2)
+   469: 0001C5   933F  push r19
+   470: 0001C6   2F34  mov r19, r20 ; load counter in
+   471: 0001C7   940E  call harmonic_minor_c_notes ; 
+        0001C8   0247
+   472: 0001C9   9330  sts BUZZER_1, r19 ; store new note
+        0001CA   0100
+   473: 0001CB   2F35  mov r19, r21 ; load counter in
+   474: 0001CC   940E  call  harmonic_minor_c_notes;
+        0001CD   0247
+   475: 0001CE   9330  sts BUZZER_2, r19 ; store new note
+        0001CF   0101
+   476: 0001D0   913F  pop r19
+   477: 0001D1   9508  ret
+   478: scale_6: ; carry in r20 (counter_1) and r21 (counter_2)
+   479: 0001D2   933F  push r19
+   480: 0001D3   2F34  mov r19, r20 ; load counter in
+   481: 0001D4   940E  call major_bebop_c_notes; 
+        0001D5   0261
+   482: 0001D6   9330  sts BUZZER_1, r19 ; store new note
+        0001D7   0100
+   483: 0001D8   2F35  mov r19, r21 ; load counter in
+   484: 0001D9   940E  call major_bebop_c_notes;
+        0001DA   0261
+   485: 0001DB   9330  sts BUZZER_2, r19 ; store new note
+        0001DC   0101
+   486: 0001DD   913F  pop r19
+   487: 0001DE   9508  ret
+   488: scale_7: ; carry in r20 (counter_1) and r21 (counter_2)
+   489: 0001DF   933F  push r19
+   490: 0001E0   2F34  mov r19, r20 ; load counter in
+   491: 0001E1   940E  call aeolian_dominant_c_notes; 
+        0001E2   026E
+   492: 0001E3   9330  sts BUZZER_1, r19 ; store new note
+        0001E4   0100
+   493: 0001E5   2F35  mov r19, r21 ; load counter in
+   494: 0001E6   940E  call aeolian_dominant_c_notes;
+        0001E7   026E
+   495: 0001E8   9330  sts BUZZER_2, r19 ; store new note
+        0001E9   0101
+   496: 0001EA   913F  pop r19
+   497: 0001EB   9508  ret
+   498: scale_8: ; carry in r20 (counter_1) and r21 (counter_2)
+   499: 0001EC   933F  push r19
+   500: 0001ED   2F34  mov r19, r20 ; load counter in
+   501: 0001EE   940E  call phyrgian_dominant_c_notes ; 
+        0001EF   027B
+   502: 0001F0   9330  sts BUZZER_1, r19 ; store new note
+        0001F1   0100
+   503: 0001F2   2F35  mov r19, r21 ; load counter in
+   504: 0001F3   940E  call phyrgian_dominant_c_notes ;
+        0001F4   027B
+   505: 0001F5   9330  sts BUZZER_2, r19 ; store new note
+        0001F6   0101
+   506: 0001F7   913F  pop r19
+   507: 0001F8   9508  ret
+   508: scale_9: ; carry in r20 (counter_1) and r21 (counter_2)
+   509: 0001F9   933F  push r19
+   510: 0001FA   2F34  mov r19, r20 ; load counter in
+   511: 0001FB   940E  call chromatic_notes; 
+        0001FC   0254
+   512: 0001FD   9330  sts BUZZER_1, r19 ; store new note
+        0001FE   0100
+   513: 0001FF   2F35  mov r19, r21 ; load counter in
+   514: 000200   940E  call chromatic_notes;
+        000201   0254
+   515: 000202   9330  sts BUZZER_2, r19 ; store new note
+        000203   0101
+   516: 000204   913F  pop r19
+   517: 000205   9508  ret
+   518: blues_c_notes: ; carry in r19, which should hold counter_1 or counter_2 value
+   519: 000206   93EF  push ZL ; Store registers
+   520: 000207   93FF  push ZH
+   521: 000208   931F  push r17
+   522: 000209   2711  clr r17
+   523: 00020A   EEEA  ldi ZL, LOW(BLUES_SCALE_C*2) ; Load in address into Z
+   524: 00020B   E0F6  ldi ZH, HIGH(BLUES_SCALE_C*2)
+   525: 00020C   0FE3  add ZL, r19 ; Move Z pointer to offset
+   526: 00020D   1FF1  adc ZH, r17 ; Deal with overflow if memory is on an 8 bit edge
+   527: 00020E   9134  lpm r19, Z ; Load value from SRAM and carry out through r19
+   528: 00020F   911F  pop r17
+   529: 000210   91FF  pop ZH ; Restore registers
+   530: 000211   91EF  pop ZL
+   531: 000212   9508  ret ; Return
+   532: major_c_notes: ; carry in r19, which should hold counter_1 or counter_2 value
+   533: 000213   93EF  push ZL ; Store registers
+   534: 000214   93FF  push ZH
+   535: 000215   931F  push r17
+   536: 000216   2711  clr r17
+   537: 000217   EBE2  ldi ZL, LOW(MAJOR_SCALE_C*2) ; Load in address into Z
+   538: 000218   E0F6  ldi ZH, HIGH(MAJOR_SCALE_C*2)
+   539: 000219   0FE3  add ZL, r19 ; Move Z pointer to offset
+   540: 00021A   1FF1  adc ZH, r17 ; Deal with overflow if memory is on an 8 bit edge
+   541: 00021B   9134  lpm r19, Z ; Load value from SRAM and carry out through r19
+   542: 00021C   911F  pop r17
+   543: 00021D   91FF  pop ZH ; Restore registers
+   544: 00021E   91EF  pop ZL
+   545: 00021F   9508  ret ; Return
+   546: minor_c_notes: ; carry in r19, which should hold counter_1 or counter_2 value
+   547: 000220   93EF  push ZL ; Store registers
+   548: 000221   93FF  push ZH
+   549: 000222   931F  push r17
+   550: 000223   2711  clr r17
+   551: 000224   ECEE  ldi ZL, LOW(MINOR_SCALE_C*2) ; Load in address into Z
+   552: 000225   E0F6  ldi ZH, HIGH(MINOR_SCALE_C*2)
+   553: 000226   0FE3  add ZL, r19 ; Move Z pointer to offset
+   554: 000227   1FF1  adc ZH, r17 ; Deal with overflow if memory is on an 8 bit edge
+   555: 000228   9134  lpm r19, Z ; Load value from SRAM and carry out through r19
+   556: 000229   911F  pop r17
+   557: 00022A   91FF  pop ZH ; Restore registers
+   558: 00022B   91EF  pop ZL
+   559: 00022C   9508  ret ; Return
+   560: pentatonic_b_notes: ; carry in r19, which should hold counter_1 or counter_2 value
+   561: 00022D   93EF  push ZL ; Store registers
+   562: 00022E   93FF  push ZH
+   563: 00022F   931F  push r17
+   564: 000230   2711  clr r17
+   565: 000231   E7EA  ldi ZL, LOW(PENTATONIC_SCALE_B*2) ; Load in address into Z
+   566: 000232   E0F6  ldi ZH, HIGH(PENTATONIC_SCALE_B*2)
+   567: 000233   0FE3  add ZL, r19 ; Move Z pointer to offset
+   568: 000234   1FF1  adc ZH, r17 ; Deal with overflow if memory is on an 8 bit edge
+   569: 000235   9134  lpm r19, Z ; Load value from SRAM and carry out through r19
+   570: 000236   911F  pop r17
+   571: 000237   91FF  pop ZH ; Restore registers
+   572: 000238   91EF  pop ZL
+   573: 000239   9508  ret ; Return
+   574: pentatonic_c_notes: ; carry in r19, which should hold counter_1 or counter_2 value
+   575: 00023A   93EF  push ZL ; Store registers
+   576: 00023B   93FF  push ZH
+   577: 00023C   931F  push r17
+   578: 00023D   2711  clr r17
+   579: 00023E   E9E6  ldi ZL, LOW(PENTATONIC_SCALE_C*2) ; Load in address into Z
+   580: 00023F   E0F6  ldi ZH, HIGH(PENTATONIC_SCALE_C*2)
+   581: 000240   0FE3  add ZL, r19 ; Move Z pointer to offset
+   582: 000241   1FF1  adc ZH, r17 ; Deal with overflow if memory is on an 8 bit edge
+   583: 000242   9134  lpm r19, Z ; Load value from SRAM and carry out through r19
+   584: 000243   911F  pop r17
+   585: 000244   91FF  pop ZH ; Restore registers
+   586: 000245   91EF  pop ZL
+   587: 000246   9508  ret ; Return
+   588: harmonic_minor_c_notes: ; carry in r19, which should hold counter_1 or counter_2 value
+   589: 000247   93EF  push ZL ; Store registers
+   590: 000248   93FF  push ZH
+   591: 000249   931F  push r17
+   592: 00024A   2711  clr r17
+   593: 00024B   E0E6  ldi ZL, LOW(HARMONIC_MINOR_SCALE_C*2) ; Load in address into Z
+   594: 00024C   E0F7  ldi ZH, HIGH(HARMONIC_MINOR_SCALE_C*2)
+   595: 00024D   0FE3  add ZL, r19 ; Move Z pointer to offset
+   596: 00024E   1FF1  adc ZH, r17 ; Deal with overflow if memory is on an 8 bit edge
+   597: 00024F   9134  lpm r19, Z ; Load value from SRAM and carry out through r19
+   598: 000250   911F  pop r17
+   599: 000251   91FF  pop ZH ; Restore registers
+   600: 000252   91EF  pop ZL
+   601: 000253   9508  ret ; Return
+   602: chromatic_notes: ; carry in r19, which should hold counter_1 or counter_2 value
+   603: 000254   93EF  push ZL ; Store registers
+   604: 000255   93FF  push ZH
+   605: 000256   931F  push r17
+   606: 000257   2711  clr r17
+   607: 000258   E2E2  ldi ZL, LOW(CHROMATIC_SCALE*2) ; Load in address into Z
+   608: 000259   E0F7  ldi ZH, HIGH(CHROMATIC_SCALE*2)
+   609: 00025A   0FE3  add ZL, r19 ; Move Z pointer to offset
+   610: 00025B   1FF1  adc ZH, r17 ; Deal with overflow if memory is on an 8 bit edge
+   611: 00025C   9134  lpm r19, Z ; Load value from SRAM and carry out through r19
+   612: 00025D   911F  pop r17
+   613: 00025E   91FF  pop ZH ; Restore registers
+   614: 00025F   91EF  pop ZL
+   615: 000260   9508  ret ; Return
+   616: major_bebop_c_notes: ; carry in r19, which should hold counter_1 or counter_2 value
+   617: 000261   93EF  push ZL ; Store registers
+   618: 000262   93FF  push ZH
+   619: 000263   931F  push r17
+   620: 000264   2711  clr r17
+   621: 000265   E3EE  ldi ZL, LOW(MAJOR_BEBOP_C*2) ; Load in address into Z
+   622: 000266   E0F7  ldi ZH, HIGH(MAJOR_BEBOP_C*2)
+   623: 000267   0FE3  add ZL, r19 ; Move Z pointer to offset
+   624: 000268   1FF1  adc ZH, r17 ; Deal with overflow if memory is on an 8 bit edge
+   625: 000269   9134  lpm r19, Z ; Load value from SRAM and carry out through r19
+   626: 00026A   911F  pop r17
+   627: 00026B   91FF  pop ZH ; Restore registers
+   628: 00026C   91EF  pop ZL
+   629: 00026D   9508  ret ; Return
+   630: aeolian_dominant_c_notes: ; carry in r19, which should hold counter_1 or counter_2 value
+   631: 00026E   93EF  push ZL ; Store registers
+   632: 00026F   93FF  push ZH
+   633: 000270   931F  push r17
+   634: 000271   2711  clr r17
+   635: 000272   E5EA  ldi ZL, LOW(AEOLIAN_DOMINANT_C*2) ; Load in address into Z
+   636: 000273   E0F7  ldi ZH, HIGH(AEOLIAN_DOMINANT_C*2)
+   637: 000274   0FE3  add ZL, r19 ; Move Z pointer to offset
+   638: 000275   1FF1  adc ZH, r17 ; Deal with overflow if memory is on an 8 bit edge
+   639: 000276   9134  lpm r19, Z ; Load value from SRAM and carry out through r19
+   640: 000277   911F  pop r17
+   641: 000278   91FF  pop ZH ; Restore registers
+   642: 000279   91EF  pop ZL
+   643: 00027A   9508  ret ; Return
+   644: phyrgian_dominant_c_notes: ; carry in r19, which should hold counter_1 or counter_2 value
+   645: 00027B   93EF  push ZL ; Store registers
+   646: 00027C   93FF  push ZH
+   647: 00027D   931F  push r17
+   648: 00027E   2711  clr r17
+   649: 00027F   E7E6  ldi ZL, LOW(PHRYGIAN_DOMINANT_C*2) ; Load in address into X
+   650: 000280   E0F7  ldi ZH, HIGH(PHRYGIAN_DOMINANT_C*2)
+   651: 000281   0FE3  add ZL, r19 ; Move X pointer to offset
+   652: 000282   1FF1  adc ZH, r17 ; Deal with overflow if memory is on an 8 bit edge
+   653: 000283   9134  lpm r19, Z ; Load value from SRAM and carry out through r19
+   654: 000284   911F  pop r17
+   655: 000285   91FF  pop ZH ; Restore registers
+   656: 000286   91EF  pop ZL
+   657: 000287   9508  ret ; Return
+   658: zelda_unlock_start:
+   659: 000288   93EF  push ZL ; Store registers
+   660: 000289   93FF  push ZH
+   661: 00028A   930F  push r16
+   662: 00028B   931F  push r17
+   663: 00028C   932F  push r18
+   664: 00028D   933F  push r19
+   665: 00028E   934F  push r20
+   666: 00028F   E049  ldi r20, $09 ; for jumping the octave
+   667: 000290   2711  clr r17 ; for adc
+   668: 000291   2700  clr r16 ; cleared for counter
+   669: zelda_unlock:
+   670: 000292   0000  nop ; No op, pause / wait
+   671: 000293   9BB1  sbis TIFR1, OCF1A ; skip if bit in Timer/Counter Interrupt Flag register is set
+   672: 	; TIFR1 - Timer/Counter1 Interrupt Flag Register
+   673: 	; OCF1A - Timer/Counter1, Output Compare A Match Flag
+   674: 000294   CFFD  rjmp zelda_unlock ; loop back up continuously
+   675: 000295   0000  nop ; OCF1A Bit is set (this means counter has reached compare value)
+   676: 000296   9AB1  sbi TIFR1, OCF1A ; Set timer compare bit (should clear it)
+   677: 000297   3008  cpi r16, $08 ; if the final note has played
+   678: 000298   F069  breq zelda_unlock_end
+   679: 000299   E6E8  ldi ZL, LOW(ZELDA_UNLOCK_NOTES*2) ; load in address into Z
+   680: 00029A   E0F6  ldi ZH, HIGH(ZELDA_UNLOCK_NOTES*2)
+   681: 00029B   0FE0  add ZL, r16
+   682: 00029C   1FF1  adc ZH, r17
+   683: 00029D   9503  inc r16
+   684: 00029E   9124  lpm r18, Z
+   685: 00029F   0FE4  add ZL, r20 ; jump the octave
+   686: 0002A0   1FF1  adc ZH, r17
+   687: 0002A1   9134  lpm r19, Z ; Load value from SRAM
+   688: 0002A2   BD27  out OCR0A, r18
+   689: 0002A3   9330  sts OCR2A, r19
+        0002A4   00B3
+   690: 0002A5   CFEC  rjmp zelda_unlock
+   691: zelda_unlock_end:
+   692: 0002A6   914F  pop r20
+   693: 0002A7   913F  pop r19
+   694: 0002A8   912F  pop r18
+   695: 0002A9   911F  pop r17
+   696: 0002AA   910F  pop r16
+   697: 0002AB   91FF  pop ZH ; Restore registers
+   698: 0002AC   91EF  pop ZL
+   699: 0002AD   9508  ret
+   700: change_speed:
+   701: 0002AE   930F  push r16 ; store
+   702: 0002AF   931F  push r17
+   703: 0002B0   932F  push r18
+   704: 0002B1   933F  push r19
+   705: 0002B2   93EF  push ZL
+   706: 0002B3   93FF  push ZH
+   707: 0002B4   2733  clr r19 ; make sure it's actually clear
+   708: 0002B5   E5E8  ldi ZL, LOW(TIMER_SPEED*2) ; Load in address into Z
+   709: 0002B6   E0F6  ldi ZH, HIGH(TIMER_SPEED*2)
+   710: 0002B7   9100  lds r16, TIMER_OFFSET ; load offset for speed
+        0002B8   0108
+   711: 0002B9   0FE0  add ZL, r16 ; move pointer of Z
+   712: 0002BA   1FF3  adc ZH, r19
+   713: 0002BB   9115  lpm r17, Z+ ; load first half of speed
+   714: 0002BC   9124  lpm r18, Z ; load second half of speed
+   715: 0002BD   9310  sts OCR1AH, r17
+        0002BE   0089
+   716: 0002BF   9320  sts OCR1AL, r18
+        0002C0   0088
+   717: 0002C1   91FF  pop ZH
+   718: 0002C2   91EF  pop ZL
+   719: 0002C3   913F  pop r19
+   720: 0002C4   912F  pop r18
+   721: 0002C5   911F  pop r17
+   722: 0002C6   910F  pop r16 ; restore
+   723: 0002C7   9508  ret
+   724: buzzer_2_storage: ; carry in r18 from upper_case_ascii
+   725: 0002C8   930F  push r16 ; store
+   726: 0002C9   931F  push r17
+   727: 0002CA   93AF  push XL
+   728: 0002CB   93BF  push XH
+   729: 0002CC   2711  clr r17 ; verify is clear
+   730: 0002CD   9100  lds r16, BUZZER_2_SIZE ; load in size of loop
+        0002CE   010A
+   731: 0002CF   3F0F  cpi r16, $FF ; doesn't load if buzzer if its full
+   732: 0002D0   F041  breq buzzer_2_end ; jump to end
+   733: 0002D1   E0AC  ldi XL, LOW(BUZZER_2_OFFSETS)
+   734: 0002D2   E0B1  ldi XH, HIGH(BUZZER_2_OFFSETS)
+   735: 0002D3   0FA0  add XL, r16
+   736: 0002D4   1FB1  adc XH, r17 ; move to the next open space for SRAM storage
+   737: 0002D5   932C  st X, r18 ; stores the passed in offset into the SRAM location
+   738: 0002D6   9503  inc r16
+   739: 0002D7   9300  sts BUZZER_2_SIZE, r16 ; increase the loop by 1 for the new note
+        0002D8   010A
+   740: buzzer_2_end:	
+   741: 0002D9   91BF  pop XH
+   742: 0002DA   91AF  pop XL
+   743: 0002DB   911F  pop r17
+   744: 0002DC   910F  pop r16 ; restore
+   745: 0002DD   9508  ret
+   746: clear_buzzers: ; for killing buzzer 1 and clearing buzzer 2 loop
+   747: 0002DE   931F  push r17 ; store
+   748: 0002DF   932F  push r18
+   749: 0002E0   93BF  push XH
+   750: 0002E1   93AF  push XL
+   751: 0002E2   2711  clr r17 ; insure it's actually clear
+   752: 0002E3   9310  sts COUNTER_1, r17 ; kill buzzer_1
+        0002E4   0103
+   753: 0002E5   9310  sts COUNTER_2, r17
+        0002E6   0104
+   754: 0002E7   9310  sts BUZZER_2_CURRENT, r17 ; reset position for Buzzer_2_loop
+        0002E8   010B
+   755: clear_buzzer_2_loop: ; while loop for clearing buzzer 2 offsets and resetting size of loop to 0
+   756: 0002E9   9120  lds r18, BUZZER_2_SIZE ; loads current size
+        0002EA   010A
+   757: 0002EB   3020  cpi r18, $00 ; if buzzer 2 size was already zero then it's already cleared
+   758: 0002EC   F049  breq clear_buzzer_2_done
+   759: 0002ED   E0AC  ldi XL, LOW(BUZZER_2_OFFSETS) ; loads location of buzzer_2_offsets
+   760: 0002EE   E0B1  ldi XH, HIGH(BUZZER_2_OFFSETS)
+   761: 0002EF   952A  dec r18 ; decreases because size should always be 1 more than actual size
+   762: 0002F0   0FA2  add XL, r18 ; moves to end of loop of offsets
+   763: 0002F1   0FB1  add XH, r17
+   764: 0002F2   931C  st X, r17 ; clears the last note
+   765: 0002F3   9320  sts BUZZER_2_SIZE, r18 ; set the new size
+        0002F4   010A
+   766: 0002F5   CFF3  rjmp clear_buzzer_2_loop
+   767: clear_buzzer_2_done: ; time to finish	
+   768: 0002F6   91AF  pop XL
+   769: 0002F7   91BF  pop XH
+   770: 0002F8   912F  pop r18
+   771: 0002F9   911F  pop r17 ; restore
+   772: 0002FA   9508  ret
+   773: buzzer_2_loop: ; the loop for setting the offset for Counter_2
+   774: 0002FB   930F  push r16 ; store
+   775: 0002FC   931F  push r17
+   776: 0002FD   932F  push r18
+   777: 0002FE   933F  push r19
+   778: 0002FF   93AF  push XL
+   779: 000300   93BF  push XH
+   780: 000301   2722  clr r18 ; insure it's actually cleared
+   781: 000302   9100  lds r16, BUZZER_2_SIZE ; loads in size of loop
+        000303   010A
+   782: 000304   1702  cp r16, r18 ; if the size of the loop is $00, skip to end
+   783: 000305   F071  breq buzzer_2_loop_end
+   784: 000306   9110  lds r17, BUZZER_2_CURRENT ; loads in current position in loop
+        000307   010B
+   785: 000308   E0AC  ldi XL, LOW(BUZZER_2_OFFSETS)
+   786: 000309   E0B1  ldi XH, HIGH(BUZZER_2_OFFSETS)
+   787: 00030A   0FA1  add XL, r17 ; add current offset to X
+   788: 00030B   1FB2  adc XH, r18
+   789: 00030C   913C  ld r19, X ; load offset value stored in X
+   790: 00030D   9330  sts COUNTER_2, r19 ; store it in counter_2
+        00030E   0104
+   791: 00030F   9513  inc r17 ; increment the counter
+   792: 000310   1710  cp r17, r16 ; check to see if we've reached the end of the loop
+   793: 000311   F049  breq buzzer_2_loop_reset
+   794: 000312   9310  sts BUZZER_2_CURRENT, r17 ; store the counter
+        000313   010B
+   795: buzzer_2_loop_end:	
+   796: 000314   91BF  pop XH
+   797: 000315   91AF  pop XL
+   798: 000316   913F  pop r19
+   799: 000317   912F  pop r18
+   800: 000318   911F  pop r17
+   801: 000319   910F  pop r16 ; restore
+   802: 00031A   9508  ret
+   803: buzzer_2_loop_reset: ; resets counter to $00 to start loop from beginning
+   804: 00031B   2711  clr r17
+   805: 00031C   9310  sts BUZZER_2_CURRENT, r17 
+        00031D   010B
+   806: 00031E   CFF5  rjmp buzzer_2_loop_end	
+   807: ; for simplifying assigning ascii values to the counters
+   808: ; offset sent to counter a  b  c  d   e   f   g   h   i   j   k   l   m  n  o   p   q   r   s  t   u   v  w   x  y   z
+   809: OFFSET_LETTER_VALUE: .db 8, 5, 3, 10, 19, 11, 12, 13, 24, 14, 15, 16, 7, 6, 25, 26, 17, 20, 9, 21, 23, 4, 18, 2, 22, 1
+        00031F 0508 0A03 0B13 0D0C
+        000323 0E18 100F 0607 1A19
+        000327 1411 1509 0417 0212
+        00032B 0116
+   810: ;
+   811: ; for speed of timer 1   64/sec    32/sec    16/sec    8/sec     4/sec     2/sec     256/sec   128/sec
+   812: TIMER_SPEED: .db         $00, $FA, $01, $F4, $03, $E8, $07, $D0, $0F, $A0, $1F, $40, $00, $3E, $00, $7D
+        00032C FA00 F401 E803 D007
+        000330 A00F 401F 3E00 7D00
+   813: ;
+   814: ; library of pitches
+   815: ; b2   c3   c#3  d3   d#3  e3   f3   f#3  g3   g#3  a3   a#3  b3   c4   c#4  d4   d#4  e4   f4   f#4  g4   g#4  a4   a#4  b4   c5
+   816: ; $FD, $EE, $E1, $D4, $C8, $BD, $B2, $A8, $9F, $96, $8E, $86, $7E, $77, $70, $6A, $64, $5E, $59, $54, $4F, $4B, $47, $43, $3F, $3B
+   817: ;
+   818: ; c#5  d5   d#5  e5   f5   f#5  g5   g#5  a5   a#5  b5   c6   c#6  d6   d#6  e6   f6   f#6  g6   g#6  a6   a#6  b6   c7
+   819: ; $38, $35, $32, $2F, $2C, $2A, $27, $25, $23, $21, $1F, $1D, $1C, $1A, $19, $17, $16, $15, $13, $12, $11, $10, $0F, $0E
+   820: ;
+   821: ;                       g4   f#4  d#4  a3   g#3  e4   g#4  c5   clr  g5   f#5  d#5  a4   g#4  e5   g#5  c6   clr
+   822: ZELDA_UNLOCK_NOTES: .db $4F, $54, $64, $8E, $96, $5E, $4B, $3B, $00, $27, $2A, $32, $47, $4B, $2F, $25, $1D, $00
+        000334 544F 8E64 5E96 3B4B
+        000338 2700 322A 4B47 252F
+        00033C 001D
+   823: ;
+   824: ;                       clr  b2   c#3  d#3  f#3  g#3  b3   c#4  d#4  f#4  g#4  b4   c#5  d#5  f#5  g#5  b5   c#6  d#6  f#6  g#6  b6   clr  clr  clr  clr  clr  clr
+   825: PENTATONIC_SCALE_B: .db $00, $FD, $E1, $C8, $A8, $96, $7E, $70, $64, $54, $4B, $3F, $38, $32, $2A, $25, $1F, $1C, $19, $15, $12, $0F, $00, $00, $00, $00, $00, $00
+        00033D FD00 C8E1 96A8 707E
+        000341 5464 3F4B 3238 252A
+        000345 1C1F 1519 0F12 0000
+        000349 0000 0000
+   826: ;
+   827: ;                       clr  c3   d3   e3   g3   a3   c4   d4   e4   g4   a4   c7   d7   e7   g6   a6   c7   d7   e7   g7   a7   c8   clr  clr  clr  clr  clr  clr
+   828: PENTATONIC_SCALE_C: .db $00, $EE, $D4, $BD, $9F, $8E, $77, $6A, $5E, $4F, $47, $3B, $35, $2F, $27, $23, $1D, $1A, $17, $13, $11, $0E, $00, $00, $00, $00, $00, $00
+        00034B EE00 BDD4 8E9F 6A77
+        00034F 4F5E 3B47 2F35 2327
+        000353 1A1D 1317 0E11 0000
+        000357 0000 0000
+   829: ;
+   830: ;                       clr  c3   d3   e3   f3   g3   a3   b3   c4   d4   e4   f4   g4   a4   b4   c5   d5   e5   f5   g5   a5   b5   c6   d6   e6   f6   g6   clr
+   831: MAJOR_SCALE_C: .db      $00, $EE, $D4, $BD, $B2, $9F, $8E, $7E, $77, $6A, $5E, $59, $4F, $47, $3F, $3B, $35, $2F, $2C, $27, $23, $1F, $1D, $1A, $17, $16, $13, $00
+        000359 EE00 BDD4 9FB2 7E8E
+        00035D 6A77 595E 474F 3B3F
+        000361 2F35 272C 1F23 1A1D
+        000365 1617 0013
+   832: ;
+   833: ;                       clr  c3   d3   d#3  f3   g3   g#3  a#3  c4   d4   d#4  f4   g4   g#4  a#4  c5   d5   d#5  f5   g5   g#5  a#5  c6   d6   d#6  f6   g6   clr
+   834: MINOR_SCALE_C: .db      $00, $EE, $D4, $C8, $B2, $9F, $96, $86, $77, $6A, $64, $59, $4F, $4B, $43, $3B, $35, $32, $2C, $27, $25, $21, $1D, $1A, $19, $16, $13, $00
+        000367 EE00 C8D4 9FB2 8696
+        00036B 6A77 5964 4B4F 3B43
+        00036F 3235 272C 2125 1A1D
+        000373 1619 0013
+   835: ;
+   836: ;                       clr  c3   d3   d#3  e3   g3   a3   c4   d4   d#4  e4   g4   a4   c5   d5   d#5  e5   g5   a5   c6   d6   d#6  e6   g6   a6   c7   clr  clr
+   837: BLUES_SCALE_C: .db      $00, $EE, $D4, $C8, $BD, $9F, $8E, $77, $6A, $64, $5E, $4F, $47, $3B, $35, $32, $2F, $27, $23, $1D, $1A, $19, $17, $13, $11, $0E, $00, $00
+        000375 EE00 C8D4 9FBD 778E
+        000379 646A 4F5E 3B47 3235
+        00037D 272F 1D23 191A 1317
+        000381 0E11 0000
+   838: ;
+   839: ;                            clr  c3   d3   d#3  f3   g3   g#3  b3   c4   d4   d#4  f4   g4   g#4  b4   c5   d5   d#5  f5   g5   g#5  b5   c6   d6   d#6  f6   g6   clr
+   840: HARMONIC_MINOR_SCALE_C: .db  $00, $EE, $D4, $C8, $B2, $9F, $96, $7E, $77, $6A, $64, $59, $4F, $4B, $3F, $3B, $35, $32, $2C, $27, $25, $1F, $1D, $1A, $19, $16, $13, $00
+        000383 EE00 C8D4 9FB2 7E96
+        000387 6A77 5964 4B4F 3B3F
+        00038B 3235 272C 1F25 1A1D
+        00038F 1619 0013
+   841: ;
+   842: ;                       clr  b2   c3   c#3  d3   d#3  e3   f3   f#3  g3   g#3  a3   a#3  b3   c4   c#4  d4   d#4  e4   f4   f#4  g4   g#4  a4   a#4  b4   c5   clr
+   843: CHROMATIC_SCALE: .db    $00, $FD, $EE, $E1, $D4, $C8, $BD, $B2, $A8, $9F, $96, $8E, $86, $7E, $77, $70, $6A, $64, $5E, $59, $54, $4F, $4B, $47, $43, $3F, $3B, $00
+        000391 FD00 E1EE C8D4 B2BD
+        000395 9FA8 8E96 7E86 7077
+        000399 646A 595E 4F54 474B
+        00039D 3F43 003B
+   844: ;
+   845: ;						clr  c3   d3   e3   f3   g3   g#3  a3   b3   c4   d4   e4   f4   g4   g#4  a4   b4   c5   d5   e5   f5   g5   g#5  a5   b5   c6   d6   clr
+   846: MAJOR_BEBOP_C: .db      $00, $EE, $D4, $BD, $B2, $9F, $96, $8E, $7E, $77, $6A, $5E, $59, $4F, $4B, $47, $3F, $3B, $35, $2F, $2C, $27, $25, $23, $1F, $1D, $1A, $00
+        00039F EE00 BDD4 9FB2 8E96
+        0003A3 777E 5E6A 4F59 474B
+        0003A7 3B3F 2F35 272C 2325
+        0003AB 1D1F 001A
+   847: ;
+   848: ;                       clr  c3   d3   e3   f3   g3   g#3  a#3  c4   d4   e4   f4   g4   g#4  a#4  c5   d5   e5   f5   g5   g#5  a#5  c6   d6   e6   f6   g6   clr
+   849: AEOLIAN_DOMINANT_C: .db $00, $EE, $D4, $BD, $B2, $9F, $96, $86, $77, $6A, $5E, $59, $4F, $4B, $43, $3B, $35, $2F, $2C, $27, $25, $21, $1D, $1A, $17, $16, $13, $00
+        0003AD EE00 BDD4 9FB2 8696
+        0003B1 6A77 595E 4B4F 3B43
+        0003B5 2F35 272C 2125 1A1D
+        0003B9 1617 0013
+   850: ;
+   851: ;                            clr  c3   c#3  e3   f3   g3   g#3  a#3  c4   c#4  e4   f4   g4   g#4  a#4  c5   c#5  e5   f5   g5   g#5  a#5  c6   c#6  e6   f6   g6   clr
+   852: PHRYGIAN_DOMINANT_C: .db     $00, $EE, $E1, $BD, $B2, $9F, $96, $86, $77, $70, $5E, $59, $4F, $4B, $43, $3B, $38, $2F, $2C, $27, $25, $21, $1D, $1C, $17, $16, $13, $00
+        0003BB EE00 BDE1 9FB2 8696
+        0003BF 7077 595E 4B4F 3B43
+        0003C3 2F38 272C 2125 1C1D
+        0003C7 1617 0013
+   853: 
+   854: 
+   855: ; store Counter_2 values on a loop based of timer 1 that changes on regular intervals
+   856: ; have some ascii values adjust OCR1AH and OCR1AL to change length of notes for Buzzer_1
+ -> Warning 001: 1 symbol(s) defined, but not used!
+
+Program             :      799 words.
+Constants           :      170 words.
+Total program memory:      969 words.
+Eeprom space        :        0 bytes.
+Data segment        :        0 bytes.
+Compilation completed, no errors.
+Compilation ended 10.12.2023, 22:13:45
